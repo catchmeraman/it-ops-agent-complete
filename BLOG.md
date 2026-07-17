@@ -73,7 +73,7 @@ If you want to skip the story and just deploy: jump to [Quick Start](#quick-star
 ### Option 1: Deploy Everything (CloudFormation)
 
 ```bash
-git clone https://github.com/ramandeep-chandna/it-ops-agent-complete.git
+git clone https://github.com/catchmeraman/it-ops-agent-complete.git
 cd it-ops-agent-complete
 
 # Deploy CI/CD infrastructure
@@ -474,7 +474,7 @@ Run these after deployment to validate the agent:
 
 - [Amazon Bedrock AgentCore Docs](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/)
 - [Strands Agents Framework](https://github.com/strands-agents/strands-agents)
-- [Source Code (GitHub)](https://github.com/ramandeep-chandna/it-ops-agent-complete)
+- [Source Code (GitHub)](https://github.com/catchmeraman/it-ops-agent-complete)
 - [CloudFormation Template](infrastructure/cloudformation/template.yaml)
 - [Terraform Config](infrastructure/terraform/)
 
