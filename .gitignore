@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+*.zip
+package/
+.env
+*.egg-info/
+dist/
+build/
+.terraform/
+terraform.tfstate*
+*.tfvars
+!example.tfvars
+node_modules/

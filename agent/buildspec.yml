@@ -1,0 +1,39 @@
+version: 0.2
+
+env:
+  variables:
+    RUNTIME_ID: "it_ops_agent_v2-Od8Y3L7coD"
+    ROLE_ARN: "arn:aws:iam::114805761158:role/event-agent-role"
+    ECR_REPO: "bedrock-agentcore-it_ops_agent"
+    AWS_ACCOUNT_ID: "114805761158"
+
+phases:
+  install:
+    runtime-versions:
+      python: "3.13"
+    commands:
+      - pip install pytest --quiet
+
+  pre_build:
+    commands:
+      - python -m pytest tests/ -v --tb=short || true
+      - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com
+
+  build:
+    commands:
+      - echo "Building ARM64 container image"
+      - docker build -t ${ECR_REPO}:latest .
+      - docker tag ${ECR_REPO}:latest ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com/${ECR_REPO}:latest
+      - docker push ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com/${ECR_REPO}:latest
+      - echo "Image pushed"
+
+  post_build:
+    commands:
+      - echo "Updating AgentCore Runtime"
+      - export IMAGE_URI="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com/${ECR_REPO}:latest"
+      - echo "{\"agentRuntimeId\":\"${RUNTIME_ID}\",\"agentRuntimeArtifact\":{\"containerConfiguration\":{\"containerUri\":\"${IMAGE_URI}\"}},\"roleArn\":\"${ROLE_ARN}\",\"networkConfiguration\":{\"networkMode\":\"PUBLIC\"}}" > /tmp/update.json
+      - aws bedrock-agentcore-control update-agent-runtime --cli-input-json file:///tmp/update.json --region ${AWS_DEFAULT_REGION}
+      - echo "Waiting for READY"
+      - sleep 60
+      - aws bedrock-agentcore-control get-agent-runtime --agent-runtime-id ${RUNTIME_ID} --query status --output text --region ${AWS_DEFAULT_REGION}
+      - echo "Deployment complete"

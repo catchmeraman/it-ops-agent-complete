@@ -1,0 +1,403 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  IT Ops Agent - Complete Infrastructure
+  Deploys IAM roles, S3 artifact bucket, CodeCommit, CodeBuild, CodePipeline,
+  EventBridge trigger, and SNS topic for the IT Operations Agent on AgentCore Runtime.
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: it-ops-agent
+    Description: Name prefix for all resources
+
+  RuntimeId:
+    Type: String
+    Default: it_ops_agent_v2-Od8Y3L7coD
+    Description: Existing AgentCore Runtime ID
+
+  EndpointName:
+    Type: String
+    Default: itOpsEndpoint
+    Description: AgentCore endpoint name to update on deploy
+
+  ArtifactBucket:
+    Type: String
+    Default: event-agent-kb-114805761158
+    Description: S3 bucket for agent code artifacts
+
+  ArtifactKey:
+    Type: String
+    Default: devops-outputs/it-ops-agent.zip
+    Description: S3 key for the agent zip package
+
+  KnowledgeBaseId:
+    Type: String
+    Default: 84C8RSCN6O
+    Description: Bedrock Knowledge Base ID for runbook queries
+
+  NotificationEmail:
+    Type: String
+    Default: ops-team@example.com
+    Description: Email for SNS notifications
+
+Resources:
+
+  #############################################
+  # SNS Topic for Agent Notifications
+  #############################################
+  OpsAlertsTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub "${ProjectName}-alerts"
+      DisplayName: IT Ops Agent Alerts
+
+  OpsAlertsSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      TopicArn: !Ref OpsAlertsTopic
+      Protocol: email
+      Endpoint: !Ref NotificationEmail
+
+  #############################################
+  # IAM Role for AgentCore Runtime
+  #############################################
+  AgentRuntimeRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${ProjectName}-runtime-role"
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - bedrock-agentcore.amazonaws.com
+                - bedrock.amazonaws.com
+            Action: sts:AssumeRole
+          - Effect: Allow
+            Principal:
+              AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root"
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: BedrockAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: BedrockModel
+                Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                  - bedrock:InvokeModelWithResponseStream
+                Resource: "*"
+              - Sid: KnowledgeBase
+                Effect: Allow
+                Action:
+                  - bedrock:Retrieve
+                  - bedrock:RetrieveAndGenerate
+                Resource: !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:knowledge-base/${KnowledgeBaseId}"
+              - Sid: AgentCore
+                Effect: Allow
+                Action:
+                  - bedrock-agentcore:*
+                Resource: "*"
+
+        - PolicyName: CloudWatchDiagnostics
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - cloudwatch:DescribeAlarms
+                  - cloudwatch:GetMetricStatistics
+                  - cloudwatch:GetMetricData
+                  - cloudwatch:ListMetrics
+                  - logs:FilterLogEvents
+                  - logs:GetLogEvents
+                  - logs:DescribeLogGroups
+                  - logs:DescribeLogStreams
+                  - cloudtrail:LookupEvents
+                  - cloudtrail:GetTrailStatus
+                Resource: "*"
+
+        - PolicyName: SSMRemediation
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ssm:SendCommand
+                  - ssm:GetCommandInvocation
+                  - ssm:ListCommandInvocations
+                  - ssm:DescribeInstanceInformation
+                Resource: "*"
+
+        - PolicyName: EC2Management
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ec2:DescribeInstances
+                  - ec2:DescribeInstanceStatus
+                  - ec2:RebootInstances
+                  - ec2:StartInstances
+                  - ec2:StopInstances
+                Resource: "*"
+
+        - PolicyName: SNSNotifications
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sns:Publish
+                  - sns:ListTopics
+                Resource: !Ref OpsAlertsTopic
+
+  #############################################
+  # CodeCommit Repository
+  #############################################
+  CodeRepo:
+    Type: AWS::CodeCommit::Repository
+    Properties:
+      RepositoryName: !Ref ProjectName
+      RepositoryDescription: IT Operations Agent source code for AgentCore Runtime
+
+  #############################################
+  # IAM Role for CodeBuild
+  #############################################
+  CodeBuildRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${ProjectName}-codebuild-role"
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codebuild.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: CodeBuildPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: CloudWatchLogs
+                Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: "*"
+              - Sid: S3Artifacts
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:GetBucketLocation
+                Resource:
+                  - !Sub "arn:aws:s3:::${ArtifactBucket}"
+                  - !Sub "arn:aws:s3:::${ArtifactBucket}/*"
+              - Sid: CodeCommitAccess
+                Effect: Allow
+                Action:
+                  - codecommit:GitPull
+                  - codecommit:GetBranch
+                  - codecommit:GetCommit
+                Resource: !GetAtt CodeRepo.Arn
+              - Sid: AgentCoreDeploy
+                Effect: Allow
+                Action:
+                  - bedrock-agentcore:UpdateAgentRuntime
+                  - bedrock-agentcore:GetAgentRuntime
+                  - bedrock-agentcore:UpdateAgentRuntimeEndpoint
+                  - bedrock-agentcore:GetAgentRuntimeEndpoint
+                Resource: "*"
+              - Sid: PassRole
+                Effect: Allow
+                Action: iam:PassRole
+                Resource: !GetAtt AgentRuntimeRole.Arn
+
+  #############################################
+  # CodeBuild Project
+  #############################################
+  CodeBuildProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub "${ProjectName}-build"
+      Description: Build, test, and deploy IT Ops Agent to AgentCore Runtime
+      ServiceRole: !GetAtt CodeBuildRole.Arn
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/standard:7.0
+        EnvironmentVariables:
+          - Name: RUNTIME_ID
+            Value: !Ref RuntimeId
+          - Name: S3_BUCKET
+            Value: !Ref ArtifactBucket
+          - Name: S3_KEY
+            Value: !Ref ArtifactKey
+          - Name: ROLE_ARN
+            Value: !GetAtt AgentRuntimeRole.Arn
+          - Name: ENDPOINT_NAME
+            Value: !Ref EndpointName
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: buildspec.yml
+      TimeoutInMinutes: 15
+
+  #############################################
+  # IAM Role for CodePipeline
+  #############################################
+  CodePipelineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${ProjectName}-pipeline-role"
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codepipeline.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: PipelinePolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:GetBucketVersioning
+                Resource:
+                  - !Sub "arn:aws:s3:::${ArtifactBucket}"
+                  - !Sub "arn:aws:s3:::${ArtifactBucket}/*"
+              - Effect: Allow
+                Action:
+                  - codecommit:GetBranch
+                  - codecommit:GetCommit
+                  - codecommit:UploadArchive
+                  - codecommit:GetUploadArchiveStatus
+                  - codecommit:CancelUploadArchive
+                Resource: !GetAtt CodeRepo.Arn
+              - Effect: Allow
+                Action:
+                  - codebuild:StartBuild
+                  - codebuild:BatchGetBuilds
+                Resource: !GetAtt CodeBuildProject.Arn
+
+  #############################################
+  # CodePipeline
+  #############################################
+  Pipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      Name: !Sub "${ProjectName}-pipeline"
+      RoleArn: !GetAtt CodePipelineRole.Arn
+      ArtifactStore:
+        Type: S3
+        Location: !Ref ArtifactBucket
+      Stages:
+        - Name: Source
+          Actions:
+            - Name: CodeCommitSource
+              ActionTypeId:
+                Category: Source
+                Owner: AWS
+                Provider: CodeCommit
+                Version: '1'
+              Configuration:
+                RepositoryName: !Ref ProjectName
+                BranchName: main
+                PollForSourceChanges: 'false'
+              OutputArtifacts:
+                - Name: SourceOutput
+        - Name: Build-Test-Deploy
+          Actions:
+            - Name: BuildAndDeploy
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: '1'
+              Configuration:
+                ProjectName: !Ref CodeBuildProject
+              InputArtifacts:
+                - Name: SourceOutput
+              OutputArtifacts:
+                - Name: BuildOutput
+
+  #############################################
+  # EventBridge Rule (auto-trigger on push)
+  #############################################
+  EventBridgeRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${ProjectName}-eventbridge-role"
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: StartPipeline
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: codepipeline:StartPipelineExecution
+                Resource: !Sub "arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:${ProjectName}-pipeline"
+
+  CodeChangeRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub "${ProjectName}-code-change"
+      Description: Trigger pipeline when code is pushed to main branch
+      EventPattern:
+        source:
+          - aws.codecommit
+        detail-type:
+          - CodeCommit Repository State Change
+        resources:
+          - !GetAtt CodeRepo.Arn
+        detail:
+          event:
+            - referenceCreated
+            - referenceUpdated
+          referenceName:
+            - main
+      Targets:
+        - Id: TriggerPipeline
+          Arn: !Sub "arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:${ProjectName}-pipeline"
+          RoleArn: !GetAtt EventBridgeRole.Arn
+
+Outputs:
+  CodeRepoCloneUrl:
+    Description: CodeCommit HTTPS clone URL
+    Value: !GetAtt CodeRepo.CloneUrlHttp
+
+  PipelineName:
+    Description: CodePipeline name
+    Value: !Ref Pipeline
+
+  CodeBuildProjectName:
+    Description: CodeBuild project name
+    Value: !Ref CodeBuildProject
+
+  SNSTopicArn:
+    Description: SNS topic for agent alerts
+    Value: !Ref OpsAlertsTopic
+
+  AgentRuntimeRoleArn:
+    Description: IAM role ARN for AgentCore Runtime
+    Value: !GetAtt AgentRuntimeRole.Arn
+
+  EventBridgeRuleName:
+    Description: EventBridge rule name
+    Value: !Ref CodeChangeRule
