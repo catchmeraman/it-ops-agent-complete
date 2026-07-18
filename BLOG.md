@@ -461,6 +461,59 @@ Run these after deployment to validate the agent:
 
 ---
 
+## Live Test Results (2026-07-18)
+
+We ran 5 end-to-end tests against the production agent. All 4 core capabilities work:
+
+| # | Test | Result | Latency | Agent Action |
+|---|------|--------|---------|-------------|
+| 1 | Health Check | ✅ | 4.5s | Found 2 instances — 1 stopped, 1 healthy |
+| 2 | Start Instance | ✅ | 6.3s | Started i-014a2a43c1525083a, verified pending |
+| 3 | SSM App Check | ✅ | 4.8s | Confirmed App Server healthy via SSM |
+| 4 | SNS Notification | ✅ | 4.0s | Sent status report (MessageId: 23b0989b) |
+| 5 | Full Maintenance | ❌ | 0.5s | Model access issue (Legacy model) |
+
+### Example: Full Diagnostic → Remediate → Notify Flow
+
+```
+Operator: "Run a health check on all known instances."
+Agent:    → Calls health_check(i-014a2a43c1525083a) → STOPPED
+          → Calls health_check(i-051e86cc20c88aa4a) → Running, OK
+          → "Test Server is stopped. App Server is healthy."
+
+Operator: "Start the test server."
+Agent:    → Calls server_start(i-014a2a43c1525083a) → Success
+          → Calls health_check(i-014a2a43c1525083a) → Pending
+          → "Started. Check back in 30-60s for full health."
+
+Operator: "Send notification about this to the ops team."
+Agent:    → Calls send_notification(subject, message)
+          → "✅ Sent! MessageId: 23b0989b..."
+```
+
+### Observability Logs (CloudWatch)
+
+Every invocation is automatically logged with structured JSON:
+
+```json
+{
+  "timestamp": "2026-07-18T08:55:01.937Z",
+  "level": "INFO",
+  "message": "Invocation completed successfully (6.362s)",
+  "logger": "bedrock_agentcore.app",
+  "requestId": "9a9c45ac-0fad-4738-be96-2e1c4b044fe0",
+  "sessionId": "test-start-1784364889-d17ed90886c83182"
+}
+```
+
+**Log group**: `/aws/bedrock-agentcore/runtimes/it_ops_agent_v2-Od8Y3L7coD-itOpsEndpoint`
+
+📸 **Screenshot 17**: https://us-east-1.console.aws.amazon.com/cloudwatch/home?region=us-east-1#logsV2:log-groups/log-group/$252Faws$252Fbedrock-agentcore$252Fruntimes$252Fit_ops_agent_v2-Od8Y3L7coD-itOpsEndpoint
+
+> Full test details with stack traces, performance analysis, and reproduction commands: [docs/TEST_RESULTS.md](docs/TEST_RESULTS.md)
+
+---
+
 ## What I'd Do Differently Next Time
 
 1. **Start with ARM from day one** — would have saved 2 failed builds
