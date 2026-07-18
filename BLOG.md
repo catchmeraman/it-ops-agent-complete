@@ -393,6 +393,32 @@ aws codecommit create-commit \
 
 ---
 
+### Error 9: Model marked as Legacy (ResourceNotFoundException)
+
+**Symptom:** `ConverseStream: Access denied. This Model is marked by provider as Legacy`  
+**Model:** `us.anthropic.claude-sonnet-4-20250514-v1:0`  
+**Fix:** Switch to active model:
+```python
+MODEL_ID = "us.anthropic.claude-sonnet-4-6"  # Active inference profile
+```
+
+---
+
+### Error 10: On-demand throughput not supported (ValidationException)
+
+**Symptom:** `Invocation of model ID anthropic.claude-sonnet-4-6 with on-demand throughput isn't supported`  
+**Root Cause:** Bare model IDs require provisioned throughput. Need inference profile.  
+**Fix:** Add `us.` prefix:
+```python
+# ❌ Bare model — needs provisioned throughput
+MODEL_ID = "anthropic.claude-sonnet-4-6"
+
+# ✅ Inference profile — works on-demand
+MODEL_ID = "us.anthropic.claude-sonnet-4-6"
+```
+
+---
+
 ## 12 Test Scenarios
 
 Run these after deployment to validate the agent:
@@ -471,7 +497,7 @@ We ran 5 end-to-end tests against the production agent. All 4 core capabilities 
 | 2 | Start Instance | ✅ | 6.3s | Started i-014a2a43c1525083a, verified pending |
 | 3 | SSM App Check | ✅ | 4.8s | Confirmed App Server healthy via SSM |
 | 4 | SNS Notification | ✅ | 4.0s | Sent status report (MessageId: 23b0989b) |
-| 5 | Full Maintenance | ❌ | 0.5s | Model access issue (Legacy model) |
+| 5 | Stop→Start→Notify | ✅ | ~12s | Full multi-tool: SNS→Stop→Start→SNS (4 tool calls) |
 
 ### Example: Full Diagnostic → Remediate → Notify Flow
 

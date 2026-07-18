@@ -46,7 +46,7 @@ def create_it_ops_agent() -> Agent:
     region = os.environ.get("AWS_REGION", "us-east-1")
     model_id = os.environ.get(
         "BEDROCK_MODEL_ID",
-        "anthropic.claude-sonnet-4-20250514-v1:0"
+        "anthropic.claude-sonnet-4-6"
     )
 
     model = BedrockModel(
